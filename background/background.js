@@ -225,20 +225,54 @@ chrome.tabs.onRemoved.addListener(function(tabId) {
 });
 
 chrome.webRequest.onHeadersReceived.addListener(details => {
-  const isRSS = details.responseHeaders.some(header => {
-    if (header.name.toLowerCase() == "content-type") {
-      const type = header.value.toLowerCase().replace(/^\s+|\s*(?:;.*)?$/g, "");
-      return type == "application/rss+xml" || type == "application/atom+xml";
-    }
-
-    return false;
+  const header = details.responseHeaders.find(header => {
+    return header.name.toLowerCase() === "content-type";
   });
 
-  if (isRSS) {
+  if (header === undefined) {
+    return;
+  }
+
+  const type = header.value.toLowerCase().replace(/^\s+|\s*(?:;.*)?$/g, "");
+
+  // Atom or RSS MIME type, redirect to preview page
+  if (type == "application/rss+xml" || type == "application/atom+xml") {
     const url = chrome.extension.getURL("pages/subscribe/subscribe.html") + "?" +
                   encodeURIComponent(details.url);
     return {
       redirectUrl: url,
     };
+  }
+
+  // XML MIME type, try sniffing for feed content
+  if (type == "text/xml") {
+    let decoder = new TextDecoder("utf-8");
+    let str = "";
+
+    let filter = browser.webRequest.filterResponseData(details.requestId);
+    filter.ondata = async (event) => {
+      filter.write(event.data);
+
+      str += decoder.decode(event.data, {stream: true});
+      if (str.includes("<channel") || str.includes("<feed")) {
+        filter.disconnect();
+
+        try {
+          // Verify that this is actually a feed by parsing it.
+          let feed = await FeedParser.getFeed(details.url);
+          if (feed.items.length > 0) {
+            chrome.tabs.update(details.tabId, {
+              url: chrome.extension.getURL("pages/subscribe/subscribe.html") + "?" +
+                encodeURIComponent(details.url)
+            });
+          }
+        } catch (e) {}
+      }
+
+      // Stop sniffing after some time.
+      if (str.length > 1024) {
+        filter.disconnect();
+      }
+    }
   }
 }, {urls: ["<all_urls>"], types: ["main_frame"]}, ["blocking", "responseHeaders"]);
