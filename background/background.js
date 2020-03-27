@@ -405,6 +405,26 @@ chrome.tabs.onRemoved.addListener(function(tabId) {
   delete tabIdToFeeds[tabId];
 });
 
+chrome.webRequest.onBeforeSendHeaders.addListener(async details => {
+  // XXX only our request
+  // XXX return early if cookies are included
+
+  const url = new URL(details.url);
+  const cookies = await browser.cookies.getAll({url: url.origin});
+  if (!cookies) {
+    return;
+  }
+
+  details.requestHeaders.push({
+    name: 'Cookie',
+    value: cookies.map(cookie => `${cookie.name}=${cookie.value}`).join("; ")
+  });
+
+  return {requestHeaders: details.requestHeaders};
+
+}, {urls: ["<all_urls>"], types: ["xmlhttprequest"], tabId: -1},
+["blocking", "requestHeaders"]);
+
 chrome.webRequest.onHeadersReceived.addListener(details => {
   if (!FeedPreview.enabled) {
     // Feed preview disabled, nothing to do here.

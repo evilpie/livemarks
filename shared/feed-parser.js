@@ -25,6 +25,7 @@ const FeedParser = {
       });
 
       request.overrideMimeType("text/xml");
+      request.withCredentials = true;
       request.send();
     });
   },
